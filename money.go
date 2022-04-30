@@ -84,6 +84,13 @@ func (m Money) Allocate(ratios ...uint) []int64 {
 	return res
 }
 
+// Discount returns the discounted amount that greater or equal the percent
+// discount.
+func (m Money) Discount(percent Percent) int64 {
+	ratio := float64(m.value) * float64(percent) / float64(100*m.unit)
+	return int64(math.Ceil(ratio) * float64(m.unit))
+}
+
 // AllocateMap is a convenient method to perform
 // consistent allocations based on ordered keys.
 func AllocateMap[T constraints.Ordered](m *Money, ratios map[T]uint) map[T]int64 {

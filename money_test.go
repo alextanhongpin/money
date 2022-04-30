@@ -67,7 +67,8 @@ func FuzzMoneySplit(f *testing.F) {
 		n++
 
 		amount := int64(positive)
-		m := money.New(amount, 1)
+		unit := uint(rand.Intn(len(fmt.Sprint(amount))) + 1)
+		m := money.New(amount, unit)
 		res := m.Split(n)
 		if sum := money.Sum(res...); amount != sum {
 
@@ -96,7 +97,8 @@ func FuzzMoneyAllocate(f *testing.F) {
 			ratios = append(ratios, val)
 		}
 
-		m := money.New(amount, 1)
+		unit := uint(rand.Intn(len(fmt.Sprint(amount))) + 1)
+		m := money.New(amount, unit)
 		res := m.Allocate(ratios...)
 		if sum := money.Sum(res...); amount != sum {
 			t.Errorf("split %d by %d, expected %d, got %d", amount, n, amount, sum)

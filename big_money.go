@@ -87,6 +87,15 @@ func (b BigMoney) Allocate(ratios ...uint) []*big.Int {
 	return res
 }
 
+func (b BigMoney) Discount(percent Percent) *big.Int {
+	rat := new(big.Rat).SetInt(b.value)
+	rat.Mul(rat, big.NewRat(int64(percent), 100*int64(b.unit)))
+
+	res := ratCeil(rat)
+	res.Mul(res, big.NewInt(int64(b.unit)))
+	return res
+}
+
 // AllocateBigMap is a convenient method to perform
 // consistent allocations based on ordered keys.
 func AllocateBigMap[T constraints.Ordered](m *BigMoney, ratios map[T]uint) map[T]*big.Int {
@@ -128,4 +137,15 @@ func SumBig(ints ...*big.Int) *big.Int {
 		acc.Add(acc, n)
 	}
 	return acc
+}
+
+// Returns a new big.Int set to the ceiling of x.
+func ratCeil(x *big.Rat) *big.Int {
+	z := new(big.Int)
+	m := new(big.Int)
+	z.DivMod(x.Num(), x.Denom(), m)
+	if m.Cmp(big.NewInt(0)) == 1 {
+		z.Add(z, big.NewInt(1))
+	}
+	return z
 }
