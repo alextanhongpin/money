@@ -8,16 +8,16 @@ import (
 )
 
 func FuzzMoneySplit(f *testing.F) {
-	f.Fuzz(func(t *testing.T, amount int64) {
-		if amount <= 0 {
-			return
+	f.Fuzz(func(t *testing.T, positive, n uint) {
+		if positive < n {
+			positive, n = n, positive
 		}
-		n := rand.Int63n(amount)
-		if n <= 0 {
-			return
-		}
+		positive++
+		n++
+
+		amount := int64(positive)
 		m := money.New(amount, 1)
-		res := m.Split(int(n))
+		res := m.Split(n)
 		if sum := money.Sum(res...); amount != sum {
 
 			t.Errorf("split %d by %d, expected %d, got %d", amount, n, amount, sum)
@@ -26,20 +26,19 @@ func FuzzMoneySplit(f *testing.F) {
 }
 
 func FuzzMoneyAllocate(f *testing.F) {
-	f.Fuzz(func(t *testing.T, amount int64) {
-		if amount <= 0 {
-			return
+	f.Fuzz(func(t *testing.T, positive, n uint) {
+		if positive < n {
+			positive, n = n, positive
 		}
-		n := rand.Int63n(amount)
-		if n <= 0 {
-			return
-		}
+		positive++
+		n++
 
-		var ratios []int64
-		var accRatio int64
+		amount := int64(positive)
+		var ratios []uint
+		var accRatio uint
 		for i := 0; i < int(n); i++ {
-			val := rand.Int63n(amount)
-			if accRatio+val > amount {
+			val := uint(rand.Int63n(amount) + 1)
+			if accRatio+val > positive {
 				break
 			}
 			accRatio += val

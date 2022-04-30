@@ -8,52 +8,58 @@ import (
 	"golang.org/x/exp/constraints"
 )
 
+// Money represents a monetary unit.
 type Money struct {
 	value int64
-	unit  int64
+	unit  uint
 }
 
-func Sum[T constraints.Ordered](ts ...T) T {
-	var res T
-	for _, t := range ts {
-		res += t
-	}
-	return res
-}
-
-func New(value, unit int64) *Money {
-	if value <= 0 || unit <= 0 {
-		panic("value and unit must be greater than 0")
-	}
+// New returns a pointer to Money.
+func New(value int64, unit uint) *Money {
 	return &Money{value, unit}
 }
 
-func (m Money) Split(n int) []int64 {
-	if n <= 0 {
-		panic("cannot split by 0")
+// Value returns the amount.
+func (m Money) Value() int64 {
+	return m.value
+}
+
+// Split splits the amount between n. Panics if n is zero or if the amount is less than n.
+func (m Money) Split(n uint) []int64 {
+	if n == 0 {
+		panic("MoneySplitErr: n must be greater than 0")
 	}
 	if m.value < int64(n) {
-		panic(fmt.Errorf("cannot split %d by %d", m.value, n))
+		panic(fmt.Errorf("MoneySplitErr: cannot split %d by %d", m.value, n))
 	}
 
 	res := make([]int64, n)
-	r := float64(m.value) / float64(m.unit)
-	r /= float64(n)
+	r := float64(m.value) / float64(n*m.unit)
 
 	// TODO: Add other rounding options: Ceil, Floor, Round, Bankers?
 	var acc int64
 	val := int64(math.Round(r))
-	for i := 0; i < n-1; i++ {
-		res[i] = val * m.unit
+	for i := 0; i < int(n)-1; i++ {
+		res[i] = val * int64(m.unit)
 		acc += res[i]
 	}
 
 	res[n-1] = m.value - acc
+
+	if Sum(res...) != m.value {
+		panic("MoneySplitErr: split amount does not add up to total amount")
+	}
+
 	return res
 }
 
-func (m Money) Allocate(ratios ...int64) []int64 {
-	var totalRatio int64
+// Allocate attempts to distribute the amount based on the ratios given.
+func (m Money) Allocate(ratios ...uint) []int64 {
+	if len(ratios) == 0 {
+		panic("MoneyAllocateErr: ratios is required")
+	}
+
+	var totalRatio uint
 	for _, ratio := range ratios {
 		totalRatio += ratio
 	}
@@ -66,15 +72,22 @@ func (m Money) Allocate(ratios ...int64) []int64 {
 		r = r * float64(m.value) / float64(m.unit)
 
 		val := int64(math.Round(r))
-		res[i] = val * m.unit
+		res[i] = val * int64(m.unit)
 		acc += res[i]
 	}
 	res[len(ratios)-1] = m.value - acc
+
+	if Sum(res...) != m.value {
+		panic("MoneyAllocateErr: allocated amount does not add up to total amount")
+	}
+
 	return res
 }
 
-func (m Money) AllocateMap(ratios map[int64]int64) map[int64]int64 {
-	keys := make([]int64, 0, len(ratios))
+// AllocateMap is a convenient method to perform
+// consistent allocations based on ordered keys.
+func AllocateMap[T constraints.Ordered](m *Money, ratios map[T]uint) map[T]int64 {
+	keys := make([]T, 0, len(ratios))
 	for k := range ratios {
 		keys = append(keys, k)
 	}
@@ -83,17 +96,26 @@ func (m Money) AllocateMap(ratios map[int64]int64) map[int64]int64 {
 		return keys[i] < keys[j]
 	})
 
-	values := make([]int64, len(keys))
+	values := make([]uint, len(keys))
 	for i, k := range keys {
 		values[i] = ratios[k]
 	}
 
 	allocations := m.Allocate(values...)
 
-	res := make(map[int64]int64)
+	res := make(map[T]int64)
 	for i, k := range keys {
 		res[k] = allocations[i]
 	}
 
+	return res
+}
+
+// Sum is a convenient method to sum values.
+func Sum[T constraints.Ordered](ts ...T) T {
+	var res T
+	for _, t := range ts {
+		res += t
+	}
 	return res
 }

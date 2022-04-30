@@ -1,5 +1,4 @@
-# money
-
+# money [![Go Reference](https://pkg.go.dev/badge/github.com/alextanhongpin/money.svg)](https://pkg.go.dev/github.com/alextanhongpin/money)
 
 Money package allows splitting and allocation without hanging pennies.
 
