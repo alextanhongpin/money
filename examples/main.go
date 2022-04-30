@@ -7,58 +7,30 @@ import (
 )
 
 func main() {
-	cents := int64(5030) // 5030 cents, 50.30 USD
-	unit := uint(1)      // 1 cent is the smallest amount divisible.
+	usd := USD(50, 30)
+	fmt.Println(usd.Split(3))          // [1677 1677 1676]
+	fmt.Println(usd.Allocate(1, 2, 5)) // [629 1258 3143]
 
-	fmt.Println("Split 50.30 USD by 3")
-	m := money.New(cents, unit)
-	split := m.Split(3)
-	fmt.Println(split, money.Sum(split...))
+	sgd := SGD(50, 30)
+	fmt.Println(sgd.Split(3))          // [1675 1675 1680]
+	fmt.Println(sgd.Allocate(1, 2, 5)) // [630 1260 3140]
 
-	fmt.Println("\nAlloc 50.30 USD between 1, 2 and 5")
-	alloc := m.Allocate(1, 2, 5)
-	fmt.Println(alloc, money.Sum(alloc...))
-
-	{
-		allocMapInt64 := money.AllocateMap(m, map[int64]uint{
-			1000: 1,
-			2000: 2,
-			3000: 5,
-		})
-		values := make([]int64, 0, len(allocMapInt64))
-		for _, val := range allocMapInt64 {
-			values = append(values, val)
-		}
-		fmt.Println(allocMapInt64, money.Sum(values...))
-	}
-
-	{
-		allocMapStr := money.AllocateMap(m, map[string]uint{
-			"a": 5,
-			"b": 2,
-			"c": 1,
-		})
-		values := make([]int64, 0, len(allocMapStr))
-		for _, val := range allocMapStr {
-			values = append(values, val)
-		}
-		fmt.Println(allocMapStr, money.Sum(values...))
-	}
-
-	{
-		fmt.Println("\nSplit 50.30 SGD by 3")
-		// 50.30 SGD
-		sgd := SGD(5030)
-		split := sgd.Split(3)
-		fmt.Println(split, money.Sum(split...))
-
-		fmt.Println("\nAlloc 50.30 SGD between 1, 2 and 5")
-		alloc := sgd.Allocate(1, 2, 5)
-		fmt.Println(alloc, money.Sum(alloc...))
-	}
+	idr := IDR(532_041)                // SGD 50.30 in Rupiah exchange rate.
+	fmt.Println(idr.Split(3))          // [177300 177300 177441]
+	fmt.Println(idr.Allocate(1, 2, 5)) // [66500 133000 332541]
 }
 
-func SGD(cents int64) *money.Money {
-	// Smallest coin is 5 cents.
-	return money.New(cents, 5)
+func USD(dollar, cents int64) *money.Money {
+	cents += dollar * 100
+	return money.New(cents, 1) // 1 penny is the smallest unit.
+}
+
+func SGD(dollar, cents int64) *money.Money {
+	cents += dollar * 100
+	return money.New(cents, 5) // 5 cents is the smallest unit.
+}
+
+// There are no decimals in Indonesian Rupiah.
+func IDR(rupiah int64) *money.Money {
+	return money.New(rupiah, 100) // 100 rupiah is the smallest unit.
 }
