@@ -35,6 +35,9 @@ func USD(dollar, cents int64) *money.Money {
 
 func SGD(dollar, cents int64) *money.Money {
 	cents += dollar * 100
+	// Note that the 5 cents rounding is only valid for offline payment where
+	// coins are involved.
+	// For digital payments, 1 cent is acceptable.
 	return money.New(cents, 5) // 5 cents is the smallest unit.
 }
 
