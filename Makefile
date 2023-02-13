@@ -1,6 +1,8 @@
 fuzz:
-	@go test -fuzz FuzzMoneySplit -fuzztime 10s
-	@go test -fuzz FuzzMoneyAllocate -fuzztime 10s
-	@go test -fuzz FuzzBigMoneySplit -fuzztime 10s
-	@go test -fuzz FuzzBigMoneyAllocate -fuzztime 10s
-	@go test -fuzz FuzzBigMoneyDiscount -fuzztime 10s
+	@go test -fuzz FuzzSplit -fuzztime 10s
+	@go test -fuzz FuzzAllocate -fuzztime 10s
+	@go test -fuzz FuzzDiscount -fuzztime 10s
+
+test:
+	@go test -race -v -coverprofile cov.out -cpuprofile cpu.out -memprofile mem.out
+	@go tool cover -html cov.out

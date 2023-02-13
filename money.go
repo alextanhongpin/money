@@ -1,116 +1,161 @@
 package money
 
 import (
+	"errors"
 	"fmt"
-	"math"
-	"sort"
+	"math/big"
 
 	"golang.org/x/exp/constraints"
+	"golang.org/x/exp/slices"
 )
 
-// Money represents a monetary unit.
-type Money struct {
-	value int64
-	unit  uint
+var (
+	ErrUnitInvalid      = errors.New("money: unit must be at least 1")
+	ErrNegativeAmount   = errors.New("money: negative amount")
+	ErrFractionalAmount = errors.New("money: amount cannot be fraction")
+)
+
+type Money[T constraints.Integer] struct {
+	amount T
+	unit   T
 }
 
-// New returns a pointer to Money.
-func New(value int64, unit uint) *Money {
-	return &Money{value, unit}
+func (m *Money[T]) Validate() error {
+	if m.unit < 1 {
+		return fmt.Errorf("%w: %d", ErrUnitInvalid, m.unit)
+	}
+
+	if m.amount < 0 {
+		return ErrNegativeAmount
+	}
+
+	if m.amount%m.unit != 0 {
+		return fmt.Errorf("%w: dividing %d by %d", ErrFractionalAmount, m.amount, m.unit)
+	}
+
+	return nil
 }
 
-// Value returns the amount.
-func (m Money) Value() int64 {
-	return m.value
+func NewMoney[T constraints.Integer](amount, unit T) *Money[T] {
+	return &Money[T]{
+		amount: amount,
+		unit:   unit,
+	}
 }
 
-// Split splits the amount between n. Panics if n is zero or if the amount is less than n.
-func (m Money) Split(n uint) []int64 {
+func (m *Money[T]) Amount() T {
+	return m.amount
+}
+
+func (m *Money[T]) Unit() T {
+	return m.unit
+}
+
+func (m *Money[T]) Split(n uint) []T {
+	if err := m.Validate(); err != nil {
+		panic(err)
+	}
+
 	if n == 0 {
-		panic("MoneySplitErr: n must be greater than 0")
-	}
-	if m.value < int64(n) {
-		panic(fmt.Errorf("MoneySplitErr: cannot split %d by %d", m.value, n))
+		return make([]T, 0)
 	}
 
-	res := make([]int64, n)
-	r := float64(m.value) / float64(n*m.unit)
+	amt := m.amount / m.unit / T(n) * m.unit
+	if amt < 0 {
+		panic("money: negative amount")
+	}
 
-	// TODO: Add other rounding options: Ceil, Floor, Round, Bankers?
-	var acc int64
-	val := int64(math.Round(r))
+	res := make([]T, n)
 	for i := 0; i < int(n)-1; i++ {
-		res[i] = val * int64(m.unit)
-		acc += res[i]
+		res[i] = amt
 	}
 
-	res[n-1] = m.value - acc
+	last := m.amount - amt*T(n-1)
+	if last < 0 {
+		panic("money: negative amount")
+	}
 
-	if Sum(res...) != m.value {
-		panic("MoneySplitErr: split amount does not add up to total amount")
+	res[len(res)-1] = last
+
+	if m.amount != Sum(res) {
+		panic("money: invalid split")
 	}
 
 	return res
 }
 
-// Allocate attempts to distribute the amount based on the ratios given.
-func (m Money) Allocate(ratios ...uint) []int64 {
+func (m *Money[T]) Allocate(ratios []T) []T {
+	if err := m.Validate(); err != nil {
+		panic(err)
+	}
+
 	if len(ratios) == 0 {
-		panic("MoneyAllocateErr: ratios is required")
+		return make([]T, 0)
 	}
 
-	var totalRatio uint
-	for _, ratio := range ratios {
-		totalRatio += ratio
+	units := m.amount / m.unit
+
+	totalRatios := Sum(ratios)
+
+	n := len(ratios)
+	res := make([]T, n)
+
+	total := m.amount
+	for i := 0; i < n-1; i++ {
+		if ratios[i] == 0 {
+			continue
+		}
+
+		ratio := divBigRatUint64(uint64(ratios[i]), uint64(totalRatios))
+		ratio.Mul(ratio, bigRatFromUint64(uint64(units)))
+
+		i64 := floor(ratio)
+		i64.Mul(i64, bigIntFromUint64(uint64(m.unit)))
+		u64 := i64.Uint64()
+
+		res[i] = T(u64)
+		total -= T(u64)
 	}
 
-	res := make([]int64, len(ratios))
-
-	var acc int64
-	for i := 0; i < len(ratios)-1; i++ {
-		r := float64(ratios[i]) / float64(totalRatio)
-		r = r * float64(m.value) / float64(m.unit)
-
-		val := int64(math.Round(r))
-		res[i] = val * int64(m.unit)
-		acc += res[i]
-	}
-	res[len(ratios)-1] = m.value - acc
-
-	if Sum(res...) != m.value {
-		panic("MoneyAllocateErr: allocated amount does not add up to total amount")
-	}
+	res[n-1] = total
 
 	return res
 }
 
-// Discount returns the discounted amount that greater or equal the percent
-// discount.
-func (m Money) Discount(percent Percent) int64 {
-	ratio := float64(m.value) * float64(percent) / float64(100*m.unit)
-	return int64(math.Ceil(ratio) * float64(m.unit))
+func (m *Money[T]) Discount(percent Percent) T {
+	if err := m.Validate(); err != nil {
+		panic(err)
+	}
+
+	if err := percent.Validate(); err != nil {
+		panic(err)
+	}
+
+	units := m.amount / m.unit
+
+	r64 := divBigRatUint64(uint64(percent), 100)
+	r64.Mul(r64, bigRatFromUint64(uint64(units)))
+
+	i64 := ceil(r64)
+	i64.Mul(i64, bigIntFromUint64(uint64(m.unit)))
+
+	return T(i64.Uint64())
 }
 
-// AllocateMap is a convenient method to perform
-// consistent allocations based on ordered keys.
-func AllocateMap[T constraints.Ordered](m *Money, ratios map[T]uint) map[T]int64 {
-	keys := make([]T, 0, len(ratios))
-	for k := range ratios {
+func AllocateMap[T constraints.Ordered, V constraints.Integer](m *Money[V], ratioByKey map[T]V) map[T]V {
+	keys := make([]T, 0, len(ratioByKey))
+	for k := range ratioByKey {
 		keys = append(keys, k)
 	}
+	slices.Sort(keys)
 
-	sort.Slice(keys, func(i, j int) bool {
-		return keys[i] < keys[j]
-	})
-
-	values := make([]uint, len(keys))
+	ratios := make([]V, len(ratioByKey))
 	for i, k := range keys {
-		values[i] = ratios[k]
+		ratios[i] = ratioByKey[k]
 	}
 
-	allocations := m.Allocate(values...)
-
-	res := make(map[T]int64)
+	allocations := m.Allocate(ratios)
+	res := make(map[T]V)
 	for i, k := range keys {
 		res[k] = allocations[i]
 	}
@@ -118,11 +163,45 @@ func AllocateMap[T constraints.Ordered](m *Money, ratios map[T]uint) map[T]int64
 	return res
 }
 
-// Sum is a convenient method to sum values.
-func Sum[T constraints.Ordered](ts ...T) T {
-	var res T
-	for _, t := range ts {
-		res += t
-	}
-	return res
+func divBigRat(a, b *big.Rat) *big.Rat {
+	return new(big.Rat).Mul(a, new(big.Rat).Inv(b))
+}
+
+func mulBigInt(a, b *big.Int) *big.Int {
+	return new(big.Int).Mul(a, b)
+}
+
+func divBigRatUint64(a, b uint64) *big.Rat {
+	return new(big.Rat).SetFrac(
+		bigIntFromUint64(a),
+		bigIntFromUint64(b),
+	)
+}
+
+func bigRatFromBigInt(a, b *big.Int) *big.Rat {
+	return new(big.Rat).SetFrac(a, b)
+}
+
+func bigIntFromUint64(n uint64) *big.Int {
+	return new(big.Int).SetUint64(n)
+}
+
+func bigRatFromUint64(n uint64) *big.Rat {
+	return new(big.Rat).SetUint64(n)
+}
+
+// https://golang-nuts.narkive.com/RQ5Nof2y/big-rat-ceil
+func ceil(x *big.Rat) *big.Int {
+	z := new(big.Int)
+	z.Add(x.Num(), x.Denom())
+	z.Sub(z, big.NewInt(1))
+	z.Div(z, x.Denom())
+	return z
+}
+
+// Returns a new big.Int set to the floor of x.
+func floor(x *big.Rat) *big.Int {
+	z := new(big.Int)
+	z.Div(x.Num(), x.Denom())
+	return z
 }

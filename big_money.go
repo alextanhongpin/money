@@ -3,149 +3,143 @@ package money
 import (
 	"fmt"
 	"math/big"
-	"sort"
-
-	"golang.org/x/exp/constraints"
 )
 
-// BigMoney represents a monetary unit in big integers.
+var (
+	zero = big.NewInt(0)
+	one  = big.NewInt(1)
+)
+
 type BigMoney struct {
-	value *big.Int
-	unit  uint
+	amount *big.Int
+	unit   *big.Int
 }
 
-// NewBig returns a pointer to BigMoney.
-func NewBig(value *big.Int, unit uint) *BigMoney {
+func (m *BigMoney) Validate() error {
+	if isLt(m.amount, zero) {
+		return ErrNegativeAmount
+	}
+
+	if isLt(m.unit, one) {
+		return ErrUnitInvalid
+	}
+
+	mod := new(big.Int)
+	_, _ = new(big.Int).DivMod(m.amount, m.unit, mod)
+	if !isEq(mod, zero) {
+		return fmt.Errorf("%w: dividing %d by %d", ErrFractionalAmount, m.amount, m.unit)
+	}
+
+	return nil
+}
+
+func NewBigMoney(amount, unit *big.Int) *BigMoney {
 	return &BigMoney{
-		value: value,
-		unit:  unit,
+		amount: amount,
+		unit:   unit,
 	}
 }
 
-// Value returns a copy of the amount.
-func (b BigMoney) Value() *big.Int {
-	return new(big.Int).Set(b.value)
+func (m *BigMoney) Amount() *big.Int {
+	return new(big.Int).Set(m.amount)
 }
 
-// Split splits the amount between n. Panics if n is zero or if the amount is less than n.
-func (b BigMoney) Split(n uint) []*big.Int {
+func (m *BigMoney) Unit() *big.Int {
+	return new(big.Int).Set(m.unit)
+}
+
+func (m *BigMoney) Split(n uint) []*big.Int {
+	if err := m.Validate(); err != nil {
+		panic(err)
+	}
+
 	if n == 0 {
-		panic("BigMoneySplitErr: n must be greater than 0")
-	}
-	if b.value.Cmp(big.NewInt(int64(n))) == -1 {
-		panic(fmt.Errorf("BigMoneySplitErr: cannot split %d by %d", b.value, n))
+		return make([]*big.Int, 0)
 	}
 
-	r := new(big.Rat).SetInt(b.value)
-	r = r.Mul(r, big.NewRat(1, int64(n*b.unit)))
-	e := bigRatToBigInt(r)
-	e = e.Mul(e, big.NewInt(int64(b.unit)))
+	nRat64 := new(big.Rat).SetInt64(int64(n))
+	units := bigRatFromBigInt(m.amount, m.unit)
 
+	per := floor(divBigRat(units, nRat64))
 	res := make([]*big.Int, n)
+
+	total := m.Amount()
 	for i := 0; i < int(n)-1; i++ {
-		res[i] = new(big.Int).Set(e)
+		i64 := mulBigInt(per, m.unit)
+		res[i] = i64
+		total.Sub(total, i64)
 	}
-	rem := new(big.Int).Set(b.value)
-	res[int(n)-1] = rem.Sub(rem, e.Mul(e, big.NewInt(int64(n)-1)))
 
-	if SumBig(res...).Cmp(b.value) != 0 {
-		panic("BigMoneySplitErr: allocated amount doesnot sum up to total amount")
-	}
+	res[len(res)-1] = total
 
 	return res
 }
 
-// Allocate attempts to distribute the amount based on the ratios given.
-func (b BigMoney) Allocate(ratios ...uint) []*big.Int {
-	var total uint
+func (m *BigMoney) Allocate(ratios []uint64) []*big.Int {
+	if err := m.Validate(); err != nil {
+		panic(err)
+	}
+
+	if len(ratios) == 0 {
+		return make([]*big.Int, 0)
+	}
+
+	// Find the total ratio first.
+	var ratio uint64
 	for _, r := range ratios {
-		total += r
+		ratio += r
 	}
 
-	res := make([]*big.Int, len(ratios))
-	acc := new(big.Int)
-	for i := 0; i < len(ratios)-1; i++ {
-		ratio := int64(ratios[i])
+	ratioInt64 := bigRatFromUint64(ratio)
+	unitsInt64 := bigRatFromBigInt(m.amount, m.unit)
 
-		r := new(big.Rat).SetInt(b.value)
-		r.Mul(r, big.NewRat(ratio, int64(total*b.unit)))
+	n := len(ratios)
+	res := make([]*big.Int, n)
 
-		e := bigRatToBigInt(r)
-		e = e.Mul(e, big.NewInt(int64(b.unit)))
+	total := m.Amount()
+	for i := 0; i < n-1; i++ {
+		if ratios[i] == 0 {
+			res[i] = big.NewInt(0)
+			continue
+		}
 
-		res[i] = e
-		acc.Add(acc, e)
+		// shares = ratio / total_ratio
+		r64 := divBigRat(divBigRatUint64(ratios[i], 1), ratioInt64)
+
+		// shares = shares * (amount / unit)
+		r64.Mul(r64, unitsInt64)
+
+		// shares = floor(shares)
+		i64 := floor(r64)
+
+		// shares = shares * m.unit
+		i64 = mulBigInt(i64, m.unit)
+
+		res[i] = i64
+		total.Sub(total, i64)
 	}
 
-	rem := new(big.Int).Set(b.value)
-	res[len(ratios)-1] = rem.Sub(rem, acc)
-
-	if SumBig(res...).Cmp(b.value) != 0 {
-		panic("BigMoneyAllocateErr: allocated amount doesnot sum up to total amount")
-	}
+	res[n-1] = total
 
 	return res
 }
 
-func (b BigMoney) Discount(percent Percent) *big.Int {
-	rat := new(big.Rat).SetInt(b.value)
-	rat.Mul(rat, big.NewRat(int64(percent), 100*int64(b.unit)))
-
-	res := ratCeil(rat)
-	res.Mul(res, big.NewInt(int64(b.unit)))
-	return res
-}
-
-// AllocateBigMap is a convenient method to perform
-// consistent allocations based on ordered keys.
-func AllocateBigMap[T constraints.Ordered](m *BigMoney, ratios map[T]uint) map[T]*big.Int {
-	keys := make([]T, 0, len(ratios))
-	for k := range ratios {
-		keys = append(keys, k)
+func (m *BigMoney) Discount(percent Percent) *big.Int {
+	if err := m.Validate(); err != nil {
+		panic(err)
 	}
 
-	sort.Slice(keys, func(i, j int) bool {
-		return keys[i] < keys[j]
-	})
-
-	values := make([]uint, len(keys))
-	for i, k := range keys {
-		values[i] = ratios[k]
+	if err := percent.Validate(); err != nil {
+		panic(err)
 	}
 
-	allocations := m.Allocate(values...)
+	units := bigRatFromBigInt(m.amount, m.unit)
 
-	res := make(map[T]*big.Int)
-	for i, k := range keys {
-		res[k] = allocations[i]
-	}
+	r64 := divBigRatUint64(uint64(percent), 100)
+	r64.Mul(r64, units)
 
-	return res
-}
+	i64 := ceil(r64)
+	i64.Mul(i64, m.unit)
 
-func bigRatToBigInt(r *big.Rat) *big.Int {
-	i := new(big.Int)
-	s := r.FloatString(0)
-	fmt.Sscan(s, i)
-	return i
-}
-
-// SumBig is a convenient method to sum values.
-func SumBig(ints ...*big.Int) *big.Int {
-	acc := new(big.Int)
-	for _, n := range ints {
-		acc.Add(acc, n)
-	}
-	return acc
-}
-
-// Returns a new big.Int set to the ceiling of x.
-func ratCeil(x *big.Rat) *big.Int {
-	z := new(big.Int)
-	m := new(big.Int)
-	z.DivMod(x.Num(), x.Denom(), m)
-	if m.Cmp(big.NewInt(0)) == 1 {
-		z.Add(z, big.NewInt(1))
-	}
-	return z
+	return i64
 }
